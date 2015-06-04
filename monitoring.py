@@ -33,9 +33,14 @@ class Monitoring (object):
 	def _startup():
 		
 		core.openflow.addListeners(self)
-		self.f = open("delay.%s.csv"%postfix, "w")
-		self.f.write("MeasurementType,Src/Initiator,Dst/Switch,Delay\n")
+
+		self.f = open("output.%s.csv"%postfix, "w")
+		self.f.write("Experiment,Switch,SRC_IP,DST_IP,SRC_PORT,DST_PORT,Packet_Count,Byte_Count,Duration_Sec,Duration_Nsec,Delta_Packet_Count,Delta_Byte_Count,Delta_Duration_Sec,Delta_Duration_Nsec\n")
 		self.f.flush()
+
+		self.f2 = open("delay.%s.csv"%postfix, "w")
+		self.f2.write("MeasurementType,Src/Initiator,Dst/Switch,Delay\n")
+		self.f2.flush()
 		
 		self.experiment = postfix
 		
@@ -106,8 +111,8 @@ class Monitoring (object):
 		
 		(initiator, prevTime) = barrier[xid]
 		log.debug("Delay from switch %s initiated by %s = %f"%(util.dpid_to_str(dpid), util.dpid_to_str(initiator), timeRecv - prevTime))
-		self.f.write("Switch,%s,%s,%f\n"%(util.dpid_to_str(initiator), util.dpid_to_str(dpid), timeRecv - prevTime))
-		self.f.flush()
+		self.f2.write("Switch,%s,%s,%f\n"%(util.dpid_to_str(initiator), util.dpid_to_str(dpid), timeRecv - prevTime))
+		self.f2.flush()
 		del barrier[xid]
 		return EventHalt	
 		

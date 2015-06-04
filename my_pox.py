@@ -93,14 +93,7 @@ class LearningSwitch (object):
 
   def _handle_PacketIn (self, event):
 	  
-	log.debug("Incomming packet")
-	packet = event.parsed
-	timeRecV = time.time()
-   		
-	self.f.write("Path,%s,%s,%f\n"%(EthAddr(packet.src), EthAddr(packet.dst), timeRecv - payload.timeSent) )
-	self.f.flush()
-    
-    
+	packet = event.parsed    
 
 	def flood (message = None):
 		""" Floods the packet """

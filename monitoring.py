@@ -23,6 +23,7 @@ from pox.lib.addresses import IPAddr,EthAddr
 
 import time
 
+log = core.getLogger()
 
 class Monitoring (object):
 	
@@ -32,7 +33,7 @@ class Monitoring (object):
 	def _startup():
 		
 		core.openflow.addListeners(self)
-		self.f = open("delay.%s.txt"%postfix, "w")
+		self.f = open("delay.%s.csv"%postfix, "w")
 		self.f.write("MeasurementType,Src/Initiator,Dst/Switch,Delay\n")
 		self.f.flush()
 		
@@ -68,11 +69,11 @@ class Monitoring (object):
 					monitored_pathsBySwitch[sw] = set([path])
 				else:
 					monitored_pathsBySwitch[sw].add(path)
-				pprint(monitored_pathsBySwitch[sw])
+				#pprint(monitored_pathsBySwitch[sw])
 				sw = path.prev[sw]
 		else:
 			monitored_paths[path].add(match)
-		pprint(monitored_paths[path])
+		#pprint(monitored_paths[path])
 			
 		monitored_pathsByMatch[match] = path
 			

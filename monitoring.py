@@ -32,7 +32,13 @@ class Monitoring (object):
 	
 	def _startup():
 		
-		core.openflow.addListeners(self)
+		core.openflow.addListeners(self,priority=0xfffffffe)
+		core.forwarding.l2_learning.addListeners(self)
+		log.debug('addListeners l2_learning')
+
+		self.decreaseTimer = False
+		self.increaseTimer = False
+		self.t = Timer(1, self._timer_MonitorPaths, recurring = True)
 
 		self.f = open("output.%s.csv"%postfix, "w")
 		self.f.write("Experiment,Switch,SRC_IP,DST_IP,SRC_PORT,DST_PORT,Packet_Count,Byte_Count,Duration_Sec,Duration_Nsec,Delta_Packet_Count,Delta_Byte_Count,Delta_Duration_Sec,Delta_Duration_Nsec\n")
@@ -45,6 +51,7 @@ class Monitoring (object):
 		self.experiment = postfix
 		
 		log.debug("Monitoring starting")
+		core.call_when_ready(startup, ('forwarding.l2_learning'))
 		
 	def __del__(self):
 		

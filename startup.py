@@ -17,7 +17,7 @@ def launch (postfix=datetime.now().strftime("%Y%m%d%H%M%S")):
         #from openflow.spanning_tree import launch
         #launch(no_flood = True, hold_down = True)
 
-        from forwarding.l2_learning import launch
+        from POXDelay.my_pox import launch
         launch()
 
         from POXDelay.monitoring import launch

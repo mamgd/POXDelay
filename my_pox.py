@@ -28,8 +28,14 @@ import pox.openflow.libopenflow_01 as of
 from pox.lib.util import dpid_to_str
 from pox.lib.util import str_to_bool
 import time
+import pox.lib.util as util
+
+from collections import namedtuple
 
 log = core.getLogger()
+
+mac_learning = {}
+switch_ports = {}
 
 # We don't want to flood immediately when a switch connects.
 # Can be overriden on commandline.
@@ -98,6 +104,7 @@ class LearningSwitch (object):
     """
     Handle packet in messages from the switch to implement above algorithm.
     """
+    packet = event.parsed
     def forward(port):
       msg = of.ofp_packet_out()
       msg.actions.append(of.ofp_action_output(port = port))
@@ -132,55 +139,55 @@ class LearningSwitch (object):
       msg.in_port = event.port
       self.connection.send(msg)
 
-    def drop (duration = None):
+    def drop ():
       """
       Drops this packet and optionally installs a flow to continue
       dropping similar ones for a while
       """
-      if duration is not None:
-        if not isinstance(duration, tuple):
-          duration = (duration,duration)
-        msg = of.ofp_flow_mod()
-        msg.match = of.ofp_match.from_packet(packet)
-        msg.idle_timeout = duration[0]
-        msg.hard_timeout = duration[1]
-        msg.buffer_id = event.ofp.buffer_id
-        self.connection.send(msg)
-      elif event.ofp.buffer_id is not None:
+      if event.ofp.buffer_id is not None:
         msg = of.ofp_packet_out()
         msg.buffer_id = event.ofp.buffer_id
+	event.buffer_id = event.ofp.buffer_id
         msg.in_port = event.port
         self.connection.send(msg)
 
-    self.macToPort[packet.src] = event.port # 1
+    log.debug("Received PacketIn")
 
-    if not self.transparent: # 2
-      if packet.type == packet.LLDP_TYPE or packet.dst.isBridgeFiltered():
-        drop() # 2a
-        return
+    SwitchPort = namedtuple('SwitchPoint', 'dpid port')
 
-    if packet.dst.is_multicast:
-      flood() # 3a
+    if (event.dpid,event.port) not in switch_ports:
+	mac_learning[packet.src] = SwitchPort(event.dpid, event.port)
+
+    if packet.type == packet.LLDP_TYPE:
+        drop()
+	log.debut("Switch %s dropped LLDP packet", self)
+    elif packet.dst.is_multicast:
+      	flood()
+      	log.debug("Switch %s flooded multicast 0x%0.4X type packet", self, packet.type)
+    elif packet.dst not in mac_learning: 
+        flood()
+	log.debug("Switch %s flooded unicast 0x%0.4X type packet, due to unlearned MAC address", self, packet.type)
+    elif packet.type == packet.ARP_TYPE:
+	drop()
+	dst = mac_learning[packet.dst]
+	msg = of.ofp_packet_out()
+	msg.data = event.ofp.data
+	msg.actions.append(of.ofp_action_output(port = dst.port))
+	self.connection.send(msg)
+	log.debug("Switch %s processed unicast ARP (0x0806) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
     else:
-      if packet.dst not in self.macToPort: # 4
-        flood("Port for %s unknown -- flooding" % (packet.dst,)) # 4a
-      else:
-        port = self.macToPort[packet.dst]
-        if port == event.port: # 5
-          # 5a
-          log.warning("Same port for packet from %s -> %s on %s.%s.  Drop."
-              % (packet.src, packet.dst, dpid_to_str(event.dpid), port))
-          drop(10)
-          return
-        # 6
-        log.debug("installing flow for %s.%i -> %s.%i" %
-                  (packet.src, event.port, packet.dst, port))
-        msg = of.ofp_flow_mod()
-        msg.match = of.ofp_match.from_packet(packet, event.port)
-        msg.idle_timeout = 10
-        msg.hard_timeout = 30
+        #log.debug("Switch %s received PacketIn of type 0x%0.4X, reveived form %s.%s", self, packet.type, util.dpid_to_str(event.dpid), event.port)
+	#dst = packet.dst
+	#prev_path = _get_path(self.connection.dpid, dst.dpid)
+	#if prev_path is None:
+	#	flood()
+	#	return
+	#log.debug("Path from %s to %s over path %s", packet.src, packet.dst, prev_path)
+	
+	drop()
+	msg = of.ofp_packet_out()
         msg.actions.append(of.ofp_action_output(port = port))
-        msg.data = event.ofp # 6a
+        msg.data = event.ofp.data # 6a
         self.connection.send(msg)
 
 

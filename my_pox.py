@@ -142,16 +142,18 @@ class LearningSwitch (object):
     if packet.dst.is_multicast:
       	flood()
       	log.debug("Switch %s flooded multicast 0x%0.4X type packet", self, packet.type)
-    elif packet.dst not in self.macToPort: 
+    else:
+      if packet.dst not in self.macToPort: 
         flood("Port for %s unknown -- flooding" %(packet.dst,))
-       else:
+      else:
         port = self.macToPort[packet.dst]
 	if port == event.port:
 	  log.warning("Same port for packet from %s -> %s on %s.%s. Drop." %(packet.sorc, packet.dst, dpid_to_str(event.dpid), port))
 	  drop(10)
 	  return
 
-    elif packet.type == packet.ARP_TYPE:
+    else:
+      if packet.type == packet.ARP_TYPE:
        drop()
        msg = of.ofp_packet_out()
        msg.data = event.ofp.data

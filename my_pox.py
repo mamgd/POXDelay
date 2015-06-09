@@ -150,17 +150,16 @@ class LearningSwitch (object):
 	if port == event.port:
 	  log.warning("Same port for packet from %s -> %s on %s.%s. Drop." %(packet.sorc, packet.dst, dpid_to_str(event.dpid), port))
 	  drop(10)
-	  return
 
-    else:
-      if packet.type == packet.ARP_TYPE:
-       drop()
-       msg = of.ofp_packet_out()
-       msg.data = event.ofp.data
-       msg.actions.append(of.ofp_action_output(port = event.port))
-       self.connection.send(msg)
-       log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
-    else:
+        else:
+          if packet.type == packet.ARP_TYPE:
+           drop()
+           msg = of.ofp_packet_out()
+           msg.data = event.ofp.data
+           msg.actions.append(of.ofp_action_output(port = event.port))
+           self.connection.send(msg)
+           log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
+          else:
         #log.debug("Switch %s received PacketIn of type 0x%0.4X, reveived form %s.%s", self, packet.type, util.dpid_to_str(event.dpid), event.port)
 	#dst = packet.dst
 	#prev_path = _get_path(self.connection.dpid, dst.dpid)
@@ -169,11 +168,11 @@ class LearningSwitch (object):
 	#	return
 	#log.debug("Path from %s to %s over path %s", packet.src, packet.dst, prev_path)
 	
-	drop()
-	msg = of.ofp_packet_out()
-        msg.actions.append(of.ofp_action_output(port = port))
-        msg.data = event.ofp.data
-        self.connection.send(msg)
+	    drop()
+	    msg = of.ofp_packet_out()
+            msg.actions.append(of.ofp_action_output(port = port))
+            msg.data = event.ofp.data
+            self.connection.send(msg)
 
 
 class l2_learning (object):

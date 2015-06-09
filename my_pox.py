@@ -41,6 +41,75 @@ switch_ports = {}
 # Can be overriden on commandline.
 _flood_delay = 0
 
+class ofp_match_withHash(of.ofp_match):
+	##Our additions to enable indexing by match specifications
+	@classmethod
+	def from_ofp_match_Superclass(cls, other):	
+		match = cls()
+		
+		match.wildcards = other.wildcards
+		match.in_port = other.in_port
+		match.dl_src = other.dl_src
+		match.dl_dst = other.dl_dst
+		match.dl_vlan = other.dl_vlan
+		match.dl_vlan_pcp = other.dl_vlan_pcp
+		match.dl_type = other.dl_type
+		match.nw_tos = other.nw_tos
+		match.nw_proto = other.nw_proto
+		match.nw_src = other.nw_src
+		match.nw_dst = other.nw_dst
+		match.tp_src = other.tp_src
+		match.tp_dst = other.tp_dst
+		return match
+		
+	def __hash__(self):
+		return hash((self.wildcards, self.in_port, self.dl_src, self.dl_dst, self.dl_vlan, self.dl_vlan_pcp, self.dl_type, self.nw_tos, self.nw_proto, self.nw_src, self.nw_dst, self.tp_src, self.tp_dst))
+
+class Path(object):
+	def __init__(self, src, dst, prev, first_port):
+		self.src = src
+		self.dst = dst
+		self.prev = prev
+		self.first_port = first_port
+	
+def _get_path(src, dst):
+    #Bellman-Ford algorithm
+    keys = switches.keys()
+    distance = {}
+    previous = {}
+	
+    for dpid in keys:
+	distance[dpid] = float("+inf")
+	previous[dpid] = None
+
+    distance[src] = 0
+    for i in range(len(keys)-1):
+	for u in adj.keys(): #nested dict
+		for v in adj[u].keys():
+			w = 1
+			if distance[u] + w < distance[v]:
+				distance[v] = distance[u] + w
+				previous[v] = u 
+
+    for u in adj.keys(): #nested dict
+	for v in adj[u].keys():
+		w = 1
+		if distance[u] + w < distance[v]:
+			log.error("Graph contains a negative-weight cycle")
+			return None
+	
+    first_port = None
+    v = dst
+    u = previous[v]
+    while u is not None:
+    	if u == src:
+		first_port = adj[u][v]
+		
+    v = u
+    u = previous[v]
+				
+    return Path(src, dst, previous, first_port)  #path
+
 class LearningSwitch (object):
   """
   The learning switch "brain" associated with a single OpenFlow switch.
@@ -95,27 +164,21 @@ class LearningSwitch (object):
 
     def flood (message = None):
       """ Floods the packet """
-      msg = of.ofp_packet_out()
-      if time.time() - self.connection.connect_time >= _flood_delay:
-        # Only flood if we've been connected for a little while...
-
-        if self.hold_down_expired is False:
-          # Oh yes it is!
-          self.hold_down_expired = True
-          log.info("%s: Flood hold-down expired -- flooding",
-              dpid_to_str(event.dpid))
-
-        if message is not None: log.debug(message)
-        #log.debug("%i: flood %s -> %s", event.dpid,packet.src,packet.dst)
-        # OFPP_FLOOD is optional; on some switches you may need to change
-        # this to OFPP_ALL.
-        msg.actions.append(of.ofp_action_output(port = of.OFPP_FLOOD))
-      else:
-        pass
-        #log.info("Holding down flood for %s", dpid_to_str(event.dpid))
-      msg.data = event.ofp
-      msg.in_port = event.port
-      self.connection.send(msg)
+      for (dpid,switch) in switches.iteritems():
+	  msg = of.ofp_packet_out()
+	  if switch == self:
+	      if event.ofp.buffer_id is not None:
+	         msg.buffer_id = event.ofp.buffer_id
+	      else:
+	  	 msg.data = event.ofp.data
+	      msg.in_port = event.port
+	  else:
+	      msg.data = event.ofp.data
+	  ports = [p for p in switch.connection.ports if (dpid,p) not in switch_ports]
+	  if len(ports) > 0:
+	      for p in ports:
+		  msg.actions.append(of.ofp_action_output(port = p))
+	      switches[dpid].connection.send(msg)
 
     def drop ():
 
@@ -137,42 +200,39 @@ class LearningSwitch (object):
       if packet.type == packet.LLDP_TYPE:
           drop()
   	  log.debut("Switch %s dropped LLDP packet", self)
-	  return
-
-    if packet.dst.is_multicast:
-      	flood()
-      	log.debug("Switch %s flooded multicast 0x%0.4X type packet", self, packet.type)
-    else:
-      if packet.dst not in self.macToPort: 
-        flood("Port for %s unknown -- flooding" %(packet.dst,))
-      else:
-        port = self.macToPort[packet.dst]
-	if port == event.port:
-	  log.warning("Same port for packet from %s -> %s on %s.%s. Drop." %(packet.sorc, packet.dst, dpid_to_str(event.dpid), port))
-	  drop(10)
-
-        else:
-          if packet.type == packet.ARP_TYPE:
-           drop()
-           msg = of.ofp_packet_out()
-           msg.data = event.ofp.data
-           msg.actions.append(of.ofp_action_output(port = event.port))
-           self.connection.send(msg)
-           log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
-          else:
-        #log.debug("Switch %s received PacketIn of type 0x%0.4X, reveived form %s.%s", self, packet.type, util.dpid_to_str(event.dpid), event.port)
-	#dst = packet.dst
-	#prev_path = _get_path(self.connection.dpid, dst.dpid)
-	#if prev_path is None:
-	#	flood()
-	#	return
-	#log.debug("Path from %s to %s over path %s", packet.src, packet.dst, prev_path)
 	
-	    drop()
-	    msg = of.ofp_packet_out()
-            msg.actions.append(of.ofp_action_output(port = port))
-            msg.data = event.ofp.data
-            self.connection.send(msg)
+    elif packet.dst.is_multicast:
+      	flood()
+      	#log.debug("Switch %s flooded multicast 0x%0.4X type packet", self, packet.type)
+    elif packet.dst not in self.macToPort: 
+        flood("Port for %s unknown -- flooding" %(packet.dst,))
+    #else:
+	#port = self.macToPort[packet.dst]
+	#if port == event.port:
+	 # log.warning("Same port for packet from %s -> %s on %s.%s. Drop." %(packet.sorc, packet.dst, dpid_to_str(event.dpid), port))
+	  #drop(10)
+
+    elif packet.type == packet.ARP_TYPE:
+        drop()
+        msg = of.ofp_packet_out()
+        msg.data = event.ofp.data
+        msg.actions.append(of.ofp_action_output(port = event.port))
+        self.connection.send(msg)
+        log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
+    else:
+        log.debug("Switch %s received PacketIn of type 0x%0.4X, reveived form %s.%s", self, packet.type, util.dpid_to_str(event.dpid), event.port)
+	dst = macToPort[packet.dst]
+	prev_path = _get_path(self.connection.dpid, dst.dpid)
+	if prev_path is None:
+		flood()
+		return
+	log.debug("Path from %s to %s over path %s", packet.src, packet.dst, prev_path)
+
+	drop()
+	msg = of.ofp_packet_out()
+        msg.actions.append(of.ofp_action_output(port = port))
+        msg.data = event.ofp.data
+        self.connection.send(msg)
 
 
 class l2_learning (object):

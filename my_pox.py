@@ -34,7 +34,7 @@ from collections import namedtuple
 
 log = core.getLogger()
 
-mac_learning = {}
+switches = {}
 switch_ports = {}
 
 # We don't want to flood immediately when a switch connects.
@@ -109,6 +109,33 @@ def _get_path(src, dst):
     u = previous[v]
 				
     return Path(src, dst, previous, first_port)  #path
+
+def _install_path(prev_path, match):
+	dst_sw = prev_path.dst
+	cur_sw = prev_path.dst
+	dst_pck = match.dl_dst
+	
+	msg = of.ofp_flow_mod()
+	msg.match = match
+	msg.idle_timeout = 10
+	msg.flags = of.OFPFF_SEND_FLOW_REM	
+	msg.actions.append(of.ofp_action_output(port = mac_learning[dst_pck].port))
+	log.debug("Installing forward from switch %s to output port %s", util.dpid_to_str(cur_sw), mac_learning[dst_pck].port)
+	switches[dst_sw].connection.send(msg)
+	
+	next_sw = cur_sw
+	cur_sw = prev_path.prev[next_sw]
+	while cur_sw is not None: #for switch in path.keys():
+		msg = of.ofp_flow_mod()
+		msg.match = match
+		msg.idle_timeout = 10
+		msg.flags = of.OFPFF_SEND_FLOW_REM
+		log.debug("Installing forward from switch %s to switch %s output port %s", util.dpid_to_str(cur_sw), util.dpid_to_str(next_sw), adj[cur_sw][next_sw])
+		msg.actions.append(of.ofp_action_output(port = adj[cur_sw][next_sw]))
+		switches[cur_sw].connection.send(msg)
+		next_sw = cur_sw
+		
+		cur_sw = prev_path.prev[next_sw]
 
 class LearningSwitch (object):
   """
@@ -196,8 +223,8 @@ class LearningSwitch (object):
 
     #if (event.dpid,event.port) not in switch_ports:
         #mac_learning[packet.src] = SwitchPort(event.dpid, event.port)
-    if not self.transparent:
-      if packet.type == packet.LLDP_TYPE:
+    #if not self.transparent:
+    if packet.type == packet.LLDP_TYPE:
           drop()
   	  log.debut("Switch %s dropped LLDP packet", self)
 	
@@ -227,13 +254,44 @@ class LearningSwitch (object):
 		flood()
 		return
 	log.debug("Path from %s to %s over path %s", packet.src, packet.dst, prev_path)
-
-	drop()
+        if self.l3_matching == True: #only match on l2-properties, useful when doing experiments with UDP streams as you can insert a flow using ping and then start sending udp.
+				
+	   match = ofp_match_withHash()
+           match.dl_src = packet.src
+	   match.dl_dst = packet.dst
+	   match.dl_type = packet.type
+	   p = packet.next
+	   if isinstance(p, vlan):
+	       match.dl_type = p.eth_type
+	       match.dl_vlan = p.id
+	       match.dl_vlan_pcp = p.pcp
+	       p = p.next
+	   if isinstance(p, ipv4):
+	      match.nw_src = p.srcip
+	      match.nw_dst = p.dstip
+	      match.nw_proto = p.protocol
+	      match.nw_tos = p.tos
+	      p = p.next
+	   else:
+	       match.dl_vlan = of.OFP_VLAN_NONE
+	       match.dl_vlan_pcp = 0
+				
+	else:
+	    match = ofp_match_withHash.from_packet(packet)
+			
+	_install_path(prev_path, match)
+	
+        drop()
 	msg = of.ofp_packet_out()
         msg.actions.append(of.ofp_action_output(port = port))
         msg.data = event.ofp.data
         self.connection.send(msg)
 
+    	def _handle_ConnectionDown(self, event):
+		log.debug("Switch %s going down", util.dpid_to_str(self.connection.dpid))
+		del switches[self.connection.dpid]
+		#pprint(switches)
+	
 
 class l2_learning (object):
   """

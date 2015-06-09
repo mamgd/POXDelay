@@ -51,36 +51,13 @@ class LearningSwitch (object):
 
   We populate the table by observing traffic.  When we see a packet
   from some source coming from some port, we know that source is out
-  that port.
+  thatse:
 
   When we want to forward traffic, we look up the desintation in our
   table.  If we don't know the port, we simply send the message out
   all ports except the one it came in on.  (In the presence of loops,
   this is bad!).
 
-  In short, our algorithm looks like this:
-
-  For each packet from the switch:
-  1) Use source address and switch port to update address/port table
-  2) Is transparent = False and either Ethertype is LLDP or the packet's
-     destination address is a Bridge Filtered address?
-     Yes:
-        2a) Drop packet -- don't forward link-local traffic (LLDP, 802.1x)
-            DONE
-  3) Is destination multicast?
-     Yes:
-        3a) Flood the packet
-            DONE
-  4) Port for destination address in our address/port table?
-     No:
-        4a) Flood the packet
-            DONE
-  5) Is output port the same as input port?
-     Yes:
-        5a) Drop packet and similar ones for a while
-  6) Install flow table entry in the switch so that this
-     flow goes out the appopriate port
-     6a) Send the packet out appropriate port
   """
   def __init__ (self, connection, transparent):
     # Switch we'll be adding L2 learning switch capabilities to
@@ -105,6 +82,7 @@ class LearningSwitch (object):
     Handle packet in messages from the switch to implement above algorithm.
     """
     packet = event.parsed
+
     def forward(port):
       msg = of.ofp_packet_out()
       msg.actions.append(of.ofp_action_output(port = port))
@@ -133,17 +111,14 @@ class LearningSwitch (object):
         # this to OFPP_ALL.
         msg.actions.append(of.ofp_action_output(port = of.OFPP_FLOOD))
       else:
-        pass
+        #pass
         #log.info("Holding down flood for %s", dpid_to_str(event.dpid))
       msg.data = event.ofp
       msg.in_port = event.port
       self.connection.send(msg)
 
     def drop ():
-      """
-      Drops this packet and optionally installs a flow to continue
-      dropping similar ones for a while
-      """
+
       if event.ofp.buffer_id is not None:
         msg = of.ofp_packet_out()
         msg.buffer_id = event.ofp.buffer_id
@@ -153,29 +128,39 @@ class LearningSwitch (object):
 
     log.debug("Received PacketIn")
 
-    SwitchPort = namedtuple('SwitchPoint', 'dpid port')
+    self.macToPort[packet.src] = event.port
+    #SwitchPort = namedturpl('SwitchPoint', 'dpid port') 
 
-    if (event.dpid,event.port) not in switch_ports:
-	mac_learning[packet.src] = SwitchPort(event.dpid, event.port)
+    #if (event.dpid,event.port) not in switch_ports:
+        #mac_learning[packet.src] = SwitchPort(event.dpid, event.port)
+    if not self.transparent:
+      if packet.type == packet.LLDP_TYPE:
+          drop()
+  	  log.debut("Switch %s dropped LLDP packet", self)
+	  return
 
-    if packet.type == packet.LLDP_TYPE:
-        drop()
-	log.debut("Switch %s dropped LLDP packet", self)
-    elif packet.dst.is_multicast:
+    if packet.dst.is_multicast:
       	flood()
       	log.debug("Switch %s flooded multicast 0x%0.4X type packet", self, packet.type)
-    elif packet.dst not in mac_learning: 
-        flood()
-	log.debug("Switch %s flooded unicast 0x%0.4X type packet, due to unlearned MAC address", self, packet.type)
-    elif packet.type == packet.ARP_TYPE:
-	drop()
-	dst = mac_learning[packet.dst]
-	msg = of.ofp_packet_out()
-	msg.data = event.ofp.data
-	msg.actions.append(of.ofp_action_output(port = dst.port))
-	self.connection.send(msg)
-	log.debug("Switch %s processed unicast ARP (0x0806) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
     else:
+      if  packet.dst not in self.macToPort: 
+        flood("Port for %s unknown -- flooding" %(packet.dst,))
+      else:
+	port = self.macToPort[packet.dst]
+	if port == event.port:
+	  log.warning("Same port for packet from %s -> %s on %s.%s. Drop." %(packet.sorc, packet.dst, dpid_to_str(event.dpid), port))
+	  drop(10)
+	  return
+
+    else:
+      if packet.type == packet.ARP_TYPE:
+	 drop()
+  	 msg = of.ofp_packet_out()
+	 msg.data = event.ofp.data
+	 msg.actions.append(of.ofp_action_output(port = event.port))
+	 self.connection.send(msg)
+	 log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
+     else:
         #log.debug("Switch %s received PacketIn of type 0x%0.4X, reveived form %s.%s", self, packet.type, util.dpid_to_str(event.dpid), event.port)
 	#dst = packet.dst
 	#prev_path = _get_path(self.connection.dpid, dst.dpid)
@@ -187,7 +172,7 @@ class LearningSwitch (object):
 	drop()
 	msg = of.ofp_packet_out()
         msg.actions.append(of.ofp_action_output(port = port))
-        msg.data = event.ofp.data # 6a
+        msg.data = event.ofp.data
         self.connection.send(msg)
 
 

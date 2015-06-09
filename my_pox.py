@@ -111,7 +111,7 @@ class LearningSwitch (object):
         # this to OFPP_ALL.
         msg.actions.append(of.ofp_action_output(port = of.OFPP_FLOOD))
       else:
-        #pass
+        pass
         #log.info("Holding down flood for %s", dpid_to_str(event.dpid))
       msg.data = event.ofp
       msg.in_port = event.port
@@ -142,25 +142,23 @@ class LearningSwitch (object):
     if packet.dst.is_multicast:
       	flood()
       	log.debug("Switch %s flooded multicast 0x%0.4X type packet", self, packet.type)
-    else:
-      if  packet.dst not in self.macToPort: 
+    elif packet.dst not in self.macToPort: 
         flood("Port for %s unknown -- flooding" %(packet.dst,))
-      else:
-	port = self.macToPort[packet.dst]
+       else:
+        port = self.macToPort[packet.dst]
 	if port == event.port:
 	  log.warning("Same port for packet from %s -> %s on %s.%s. Drop." %(packet.sorc, packet.dst, dpid_to_str(event.dpid), port))
 	  drop(10)
 	  return
 
+    elif packet.type == packet.ARP_TYPE:
+       drop()
+       msg = of.ofp_packet_out()
+       msg.data = event.ofp.data
+       msg.actions.append(of.ofp_action_output(port = event.port))
+       self.connection.send(msg)
+       log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
     else:
-      if packet.type == packet.ARP_TYPE:
-	 drop()
-  	 msg = of.ofp_packet_out()
-	 msg.data = event.ofp.data
-	 msg.actions.append(of.ofp_action_output(port = event.port))
-	 self.connection.send(msg)
-	 log.debug("Switch %s processed unicast ARP (0x0807) packet, send to recipient by switch %s", self, util.dpid_to_str(dst.dpid)) 
-     else:
         #log.debug("Switch %s received PacketIn of type 0x%0.4X, reveived form %s.%s", self, packet.type, util.dpid_to_str(event.dpid), event.port)
 	#dst = packet.dst
 	#prev_path = _get_path(self.connection.dpid, dst.dpid)
